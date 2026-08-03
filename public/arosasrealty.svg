@@ -1,0 +1,30 @@
+<svg viewBox="0 0 460 360" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="fav-blue-gradient" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stopColor="#1B3B6F" />
+      <stop offset="60%" stopColor="#2C5282" />
+      <stop offset="100%" stopColor="#3182CE" />
+    </linearGradient>
+  </defs>
+
+  <!-- R Superior -->
+  <path
+    d="M 140 25 H 300 C 365 25, 395 65, 395 125 C 395 185, 360 220, 295 220 H 230 L 345 325 H 260 L 140 215 V 325 H 140 Z M 230 85 V 160 H 285 C 320 160, 332 145, 332 122 C 332 100, 320 85, 285 85 Z"
+    fill="#8A99AD"
+  />
+
+  <!-- A + L con Degradado -->
+  <path
+    d="M 25 325 L 160 140 L 285 325 H 445 V 380 H 260 L 160 235 L 95 325 Z"
+    fill="url(#fav-blue-gradient)"
+    transform="translate(0, -25)"
+  />
+
+  <!-- Ventanas de la casa -->
+  <g fill="url(#fav-blue-gradient)" transform="translate(0, -25)">
+    <rect x="135" y="245" width="22" height="22" rx="2" />
+    <rect x="163" y="245" width="22" height="22" rx="2" />
+    <rect x="135" y="273" width="22" height="22" rx="2" />
+    <rect x="163" y="273" width="22" height="22" rx="2" />
+  </g>
+</svg>
