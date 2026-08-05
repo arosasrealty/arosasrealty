@@ -127,7 +127,7 @@ export default function HomePage() {
             </p>
 
             <p className="text-slate-300 text-xs sm:text-sm leading-relaxed font-light">
-              Evita el "turismo inmobiliario". En Alejandro Rosas López Bienes Raíces, conectamos propietarios serios con compradores validados mediante un análisis técnico y financiero previo.
+              Evita el "turismo inmobiliario". En AROSAS REALTY Bienes Raíces, conectamos propietarios serios con compradores validados mediante un análisis técnico y financiero previo.
             </p>
 
             <div className="pt-4 flex items-center gap-3">
