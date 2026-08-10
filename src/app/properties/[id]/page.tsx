@@ -167,7 +167,7 @@ export default function PublicPropertyDetailPage({ params }: PageProps) {
     return () => clearInterval(interval);
   }, [images.length]);
 
-  // Descarga de PDF Ejecutivo Minimalista
+  // Descarga de PDF Ejecutivo Minimalista con Galería en Grid (2 Columnas - Más Amplias)
   const handleDownloadMinimalistPDF = async () => {
     if (!property) return;
 
@@ -347,7 +347,7 @@ export default function PublicPropertyDetailPage({ params }: PageProps) {
     // --- 7. DESCRIPCIÓN DETALLADA ---
     const descToUse = property.description || property.short_description;
     if (descToUse) {
-      if (cursorY > 210) {
+      if (cursorY > 220) {
         doc.addPage();
         cursorY = 20;
       }
@@ -363,64 +363,87 @@ export default function PublicPropertyDetailPage({ params }: PageProps) {
       doc.setTextColor(71, 85, 105);
       const splitDescription = doc.splitTextToSize(descToUse, contentWidth);
       
-      const maxLines = cursorY > 160 ? 6 : 12;
-      const linesToDraw = splitDescription.slice(0, maxLines);
-      doc.text(linesToDraw, margin, cursorY);
-      cursorY += linesToDraw.length * 3.8 + 5;
+      doc.text(splitDescription, margin, cursorY);
+      cursorY += splitDescription.length * 3.8 + 6;
     }
 
-    // --- 8. VISTA PREVIA IMAGEN PRINCIPAL (PROPORCIONAL / ASPECT RATIO REAL) ---
-    if (images.length > 0 && cursorY < 220) {
-      try {
-        const mainImgUrl = images[0].image_url;
-        const imgResponse = await fetch(mainImgUrl);
-        const blob = await imgResponse.blob();
+    // --- 8. GALERÍA EN GRID (2 COLUMNAS - MÁS AMPLIAS Y PROPORCIONALES) ---
+    if (images.length > 0) {
+      if (cursorY > 200) {
+        doc.addPage();
+        cursorY = 20;
+      }
 
-        const base64Data = await new Promise<string>((resolve) => {
-          const reader = new FileReader();
-          reader.onloadend = () => resolve(reader.result as string);
-          reader.readAsDataURL(blob);
-        });
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8.5);
+      doc.setTextColor(15, 23, 42);
+      doc.text('GALERÍA DE FOTOGRAFÍAS', margin, cursorY);
+      cursorY += 5;
 
-        const imgObj = new Image();
-        imgObj.src = base64Data;
-        await new Promise((resolve) => { imgObj.onload = resolve; });
+      const numCols = 2; // 2 columnas para imágenes más amplias
+      const gap = 4; // Espaciado entre imágenes en mm
+      const colWidth = (contentWidth - gap * (numCols - 1)) / numCols;
 
-        const originalWidth = imgObj.naturalWidth || 800;
-        const originalHeight = imgObj.naturalHeight || 600;
-        const aspectRatio = originalWidth / originalHeight;
+      for (let i = 0; i < images.length; i++) {
+        try {
+          const col = i % numCols;
+          const xPos = margin + col * (colWidth + gap);
 
-        let renderWidth = contentWidth;
-        let renderHeight = renderWidth / aspectRatio;
+          const imgUrl = images[i].image_url;
+          const imgResponse = await fetch(imgUrl);
+          const blob = await imgResponse.blob();
 
-        const maxAllowedHeight = 55;
-        if (renderHeight > maxAllowedHeight) {
-          renderHeight = maxAllowedHeight;
-          renderWidth = renderHeight * aspectRatio;
+          const base64Data = await new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result as string);
+            reader.readAsDataURL(blob);
+          });
+
+          const imgObj = new Image();
+          imgObj.src = base64Data;
+          await new Promise((resolve) => { imgObj.onload = resolve; });
+
+          const originalWidth = imgObj.naturalWidth || 800;
+          const originalHeight = imgObj.naturalHeight || 600;
+          const aspectRatio = originalWidth / originalHeight;
+
+          // Ancho proporcional a la columna y alto calculado según la relación de aspecto original
+          const renderWidth = colWidth;
+          const renderHeight = renderWidth / aspectRatio;
+
+          // Si la primera columna de la fila sobrepasa la página, hace el salto de página
+          if (col === 0 && cursorY + renderHeight > pageHeight - 15) {
+            doc.addPage();
+            cursorY = 20;
+          }
+
+          doc.addImage(base64Data, 'JPEG', xPos, cursorY, renderWidth, renderHeight);
+
+          // Salto de línea vertical al completar la fila o la última foto
+          if (col === numCols - 1 || i === images.length - 1) {
+            cursorY += renderHeight + gap;
+          }
+        } catch {
+          // Si falla alguna imagen, ignora y continúa con la siguiente
         }
-
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(8.5);
-        doc.setTextColor(15, 23, 42);
-        doc.text('VISTA PREVIA', margin, cursorY);
-        cursorY += 3.5;
-
-        const xOffset = margin + (contentWidth - renderWidth) / 2;
-        doc.addImage(base64Data, 'JPEG', xOffset, cursorY, renderWidth, renderHeight);
-      } catch {
-        // Manejo silencioso en caso de fallos de red
       }
     }
 
-    // --- 9. PIE DE PÁGINA ---
-    const footerY = pageHeight - 12;
-    doc.setDrawColor(226, 232, 240);
-    doc.line(margin, footerY - 4, pageWidth - margin, footerY - 4);
+    // --- 9. PIE DE PÁGINA EN TODAS LAS PÁGINAS ---
+    const totalPages = doc.internal.pages.length - 1;
+    for (let p = 1; p <= totalPages; p++) {
+      doc.setPage(p);
+      const footerY = pageHeight - 10;
 
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(7.5);
-    doc.setTextColor(148, 163, 184);
-    doc.text('AROSAS REALTY • Catálogo Inmobiliario Ejecutivo (arosasrealty.com.mx)', margin, footerY);
+      doc.setDrawColor(226, 232, 240);
+      doc.line(margin, footerY - 4, pageWidth - margin, footerY - 4);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7.5);
+      doc.setTextColor(148, 163, 184);
+      doc.text('AROSAS REALTY • Catálogo Inmobiliario Ejecutivo (arosasrealty.com.mx)', margin, footerY);
+      doc.text(`Página ${p} de ${totalPages}`, pageWidth - margin, footerY, { align: 'right' });
+    }
 
     const safeFileName = property.title ? property.title.toLowerCase().replace(/[^a-z0-9]/g, '_') : 'propiedad';
     doc.save(`ficha_ejecutiva_${safeFileName}.pdf`);
