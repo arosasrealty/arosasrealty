@@ -4,7 +4,7 @@ import { useEffect, useState, Suspense } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { geocodeAddress } from '@/lib/property';
+import { geocodeAddress, EXTRA_SPACES } from '@/lib/property';
 
 interface PropertyForm {
   id?: string;
@@ -33,6 +33,7 @@ interface PropertyForm {
   parking_spaces: number;
   levels: number;
   land_area_sqm: number;
+  extra_spaces: string[];
   publishing_agent: string;
   payment_methods: string[]; // Formas de Pago / Financiamiento
 }
@@ -123,6 +124,7 @@ function EditPropertyContent() {
     parking_spaces: 0,
     levels: 1,
     land_area_sqm: 0,
+    extra_spaces: [],
     lat: null,
     lng: null,
     publishing_agent: 'ARR',
@@ -211,6 +213,7 @@ function EditPropertyContent() {
             parking_spaces: data.parking_spaces ?? 0,
             levels: data.levels ?? 1,
             land_area_sqm: data.land_area_sqm ?? 0,
+            extra_spaces: Array.isArray(data.extra_spaces) ? data.extra_spaces : [],
             lat: data.lat ?? null,
             lng: data.lng ?? null,
             publishing_agent: agentVal,
@@ -332,6 +335,7 @@ function EditPropertyContent() {
       parking_spaces: Number(form.parking_spaces) || 0,
       levels: Number(form.levels) || 1,
       land_area_sqm: Number(form.land_area_sqm) || 0,
+      extra_spaces: form.extra_spaces,
       lat: form.lat !== null && !isNaN(Number(form.lat)) ? Number(form.lat) : null,
       lng: form.lng !== null && !isNaN(Number(form.lng)) ? Number(form.lng) : null,
       publishing_agent: form.publishing_agent || 'ARR',
@@ -502,6 +506,37 @@ function EditPropertyContent() {
                   onChange={(e) => setForm({ ...form, land_area_sqm: e.target.value === '' ? 0 : Number(e.target.value) })}
                   className="w-full text-xs font-medium p-2.5 bg-white rounded-xl border border-slate-300 focus:outline-none focus:border-blue-600 text-center sm:text-left"
                 />
+              </div>
+            </div>
+
+            {/* Espacios adicionales */}
+            <div className="space-y-1.5 pt-1">
+              <span className="text-[11px] font-bold text-slate-600 block">Espacios adicionales</span>
+              <div className="flex flex-wrap gap-1.5">
+                {EXTRA_SPACES.map((space) => {
+                  const selected = form.extra_spaces.includes(space);
+                  return (
+                    <button
+                      key={space}
+                      type="button"
+                      onClick={() =>
+                        setForm({
+                          ...form,
+                          extra_spaces: selected
+                            ? form.extra_spaces.filter((s) => s !== space)
+                            : [...form.extra_spaces, space],
+                        })
+                      }
+                      className={`text-[11px] font-semibold px-3 py-1.5 rounded-xl border transition ${
+                        selected
+                          ? 'bg-slate-900 border-slate-900 text-white'
+                          : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-100'
+                      }`}
+                    >
+                      {selected ? '✓ ' : '+ '}{space}
+                    </button>
+                  );
+                })}
               </div>
             </div>
           </div>

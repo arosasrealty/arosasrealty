@@ -133,3 +133,18 @@ export function pickMainImage(images?: any[] | null): string | null {
   if (typeof main === 'string') return main;
   return main?.image_url || main?.url || main?.secure_url || main?.src || null;
 }
+
+// ---------- Espacios adicionales (Dimensiones y Distribución) ----------
+// Para agregar más opciones basta con añadirlas a esta lista.
+export const EXTRA_SPACES = [
+  'Bodega',
+  'Terraza',
+  'Balcón',
+  'Área de lavado',
+  'Cuarto de servicio',
+  'Jardín',
+  'Roof garden',
+  'Estudio',
+  'Vestidor',
+  'Cuarto de TV',
+] as const;

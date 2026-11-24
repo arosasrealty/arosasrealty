@@ -40,6 +40,7 @@ interface Property {
   parking_spaces: number;
   levels: number;
   land_area_sqm: number;
+  extra_spaces?: string[];
   payment_methods?: string[] | string;
   publishing_agent?: string;
   created_at?: string;
@@ -304,7 +305,17 @@ export default function PublicPropertyDetailPage({ params }: PageProps) {
       doc.text(feat.value, xPos + boxWidth - 4, yPos + 6.5, { align: 'right' });
     });
 
-    cursorY += boxHeight * 2 + 8;
+    cursorY += boxHeight * 2 + 4;
+
+    if (Array.isArray(property.extra_spaces) && property.extra_spaces.length > 0) {
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.setTextColor(51, 65, 85);
+      const spacesLines = doc.splitTextToSize(`Espacios adicionales: ${property.extra_spaces.join(', ')}`, contentWidth);
+      doc.text(spacesLines, margin, cursorY + 3);
+      cursorY += spacesLines.length * 4 + 3;
+    }
+    cursorY += 4;
 
     // --- 5. MÉTODOS DE ADQUISICIÓN Y LEYENDA CREDITICIA ---
     doc.setFont('helvetica', 'bold');
@@ -608,6 +619,19 @@ export default function PublicPropertyDetailPage({ params }: PageProps) {
                   <span className="text-base font-black text-slate-900 leading-tight mt-0.5">{property.land_area_sqm || 0} m²</span>
                 </div>
               </div>
+
+              {Array.isArray(property.extra_spaces) && property.extra_spaces.length > 0 && (
+                <div className="pt-2 border-t border-slate-100 flex flex-wrap gap-1.5">
+                  {property.extra_spaces.map((space) => (
+                    <span
+                      key={space}
+                      className="text-xs font-semibold bg-slate-100 text-slate-700 px-3 py-1.5 rounded-xl border border-slate-200 flex items-center gap-1.5"
+                    >
+                      <span className="text-emerald-600 font-bold">✓</span> {space}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* 3. Amenidades y Características */}
