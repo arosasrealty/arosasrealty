@@ -4,6 +4,7 @@ import { useEffect, useState, Suspense } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
+import { geocodeAddress } from '@/lib/property';
 
 interface PropertyForm {
   id?: string;
@@ -17,6 +18,8 @@ interface PropertyForm {
   bathrooms: number;
   area_sqm: number;
   street: string;
+  street_number: string;
+  interior_number: string;
   neighborhood: string;
   city: string;
   state: string;
@@ -107,6 +110,8 @@ function EditPropertyContent() {
     bathrooms: 0,
     area_sqm: 0,
     street: '',
+    street_number: '',
+    interior_number: '',
     neighborhood: '',
     city: 'CDMX',
     state: 'CDMX',
@@ -193,6 +198,8 @@ function EditPropertyContent() {
             bathrooms: data.bathrooms || 0,
             area_sqm: data.area_sqm || 0,
             street: data.street || '',
+            street_number: data.street_number || '',
+            interior_number: data.interior_number || '',
             neighborhood: data.neighborhood || '',
             city: data.city || 'CDMX',
             state: data.state || 'CDMX',
@@ -226,51 +233,18 @@ function EditPropertyContent() {
 
   const handleFetchCoordinates = async () => {
     setGeoError(null);
-    const streetClean = (form.street || '').replace(/^(Av\.|Avenida|Calle|C\.)\s*/i, 'Avenida ');
-    const stateClean = (form.state || '').replace(/,?\s*CDMX/i, '');
 
-    const primaryQuery = [
-      streetClean,
-      form.neighborhood,
-      form.city,
-      stateClean,
-      form.postal_code,
-      'Mexico'
-    ].filter(Boolean).join(', ');
-
-    const fallbackQuery = [
-      streetClean,
-      form.postal_code,
-      form.city,
-      'Mexico'
-    ].filter(Boolean).join(', ');
-
-    if (!streetClean && !form.postal_code) {
+    if (!form.street.trim() && !form.postal_code.trim()) {
       setGeoError('Por favor escribe al menos la calle o el código postal para buscar la ubicación.');
       return;
     }
 
     setGeocoding(true);
     try {
-      const fetchCoords = async (queryStr: string) => {
-        const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(queryStr)}&limit=1`;
-        const res = await fetch(url);
-        return await res.json();
-      };
-
-      let data = await fetchCoords(primaryQuery);
-
-      if (!data || data.length === 0) {
-        data = await fetchCoords(fallbackQuery);
-      }
-
-      if (data && data.length > 0) {
-        const { lat, lon } = data[0];
-        setForm(prev => ({
-          ...prev,
-          lat: parseFloat(lat),
-          lng: parseFloat(lon)
-        }));
+      // Usa el domicilio atomizado (calle, número, colonia, alcaldía, estado, C.P.)
+      const result = await geocodeAddress(form);
+      if (result) {
+        setForm(prev => ({ ...prev, lat: result.lat, lng: result.lng }));
       } else {
         setGeoError('No se encontraron coordenadas para esta dirección. Prueba simplificando la colonia o ajustando la calle.');
       }
@@ -345,6 +319,8 @@ function EditPropertyContent() {
       bathrooms: Number(form.bathrooms) || 0,
       area_sqm: Number(form.area_sqm) || 0,
       street: form.street,
+      street_number: form.street_number || null,
+      interior_number: form.interior_number || null,
       neighborhood: form.neighborhood,
       city: form.city,
       state: form.state,
@@ -611,11 +587,11 @@ function EditPropertyContent() {
               📍 Ubicación, Coordenadas y Mapa
             </span>
 
-            {/* Fila 1: Calle y Número | Colonia */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {/* Fila 1a: Calle | Núm. exterior | Núm. interior */}
+            <div className="grid grid-cols-1 sm:grid-cols-[1fr_120px_120px] gap-3">
               <input
                 type="text"
-                placeholder="Calle y Número"
+                placeholder="Calle (ej. Av. México Coyoacán)"
                 value={form.street}
                 onChange={(e) => {
                   setForm({ ...form, street: e.target.value });
@@ -623,6 +599,30 @@ function EditPropertyContent() {
                 }}
                 className="text-xs font-medium p-2.5 bg-white rounded-xl border border-slate-300 focus:outline-none focus:border-blue-600"
               />
+              <input
+                type="text"
+                placeholder="Núm. exterior"
+                value={form.street_number}
+                onChange={(e) => {
+                  setForm({ ...form, street_number: e.target.value });
+                  setGeoError(null);
+                }}
+                className="text-xs font-medium p-2.5 bg-white rounded-xl border border-slate-300 focus:outline-none focus:border-blue-600"
+              />
+              <input
+                type="text"
+                placeholder="Núm. interior"
+                value={form.interior_number}
+                onChange={(e) => {
+                  setForm({ ...form, interior_number: e.target.value });
+                  setGeoError(null);
+                }}
+                className="text-xs font-medium p-2.5 bg-white rounded-xl border border-slate-300 focus:outline-none focus:border-blue-600"
+              />
+            </div>
+
+            {/* Fila 1b: Colonia */}
+            <div className="grid grid-cols-1 gap-3">
               <input
                 type="text"
                 placeholder="Colonia"

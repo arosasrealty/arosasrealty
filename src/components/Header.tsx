@@ -47,17 +47,17 @@ export default function Header() {
             {/* Contacto Directo */}
             <div className="hidden md:flex items-center gap-6 text-slate-300 font-semibold text-[11px]">
               <a 
-                href="mailto:contacto@arosasrealty.com.mx" 
+                href="mailto:dcalexrosas@gmail.com" 
                 className="hover:text-white transition-colors"
               >
-                contacto@arosasrealty.com.mx
+                dcalexrosas@gmail.com
               </a>
               <span className="text-slate-600 font-normal">|</span>
               <a 
-                href="tel:+525500000000" 
+                href="tel:+525544857098" 
                 className="text-[#C5A059] font-bold hover:text-amber-300 transition-colors"
               >
-                +52 55 0000 0000
+                +52 55 4485 7098
               </a>
             </div>
           </div>

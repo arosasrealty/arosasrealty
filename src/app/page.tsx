@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import dynamic from 'next/dynamic';
 import { supabase } from '@/lib/supabase';
+import { buildFullAddress, getCoords, pickMainImage, propertyPath } from '@/lib/property';
 
 const PropertyMap = dynamic(() => import('@/components/Map'), { ssr: false });
 
@@ -49,26 +50,20 @@ export default function HomePage() {
         }
 
         if (data && data.length > 0) {
-          const formatted = data.map((item: any, idx: number) => {
-            const baseLat = item.latitude ? parseFloat(item.latitude) : 19.42 + (idx * 0.012);
-            const baseLng = item.longitude ? parseFloat(item.longitude) : -99.16 - (idx * 0.015);
-            
-            // Extraemos la URL de Cloudinary de la primera imagen de la lista
-            let primaryImage: string | null = null;
-            const imagesList = item.property_images;
+          const formatted = data.map((item: any) => {
+            // Coordenadas reales de la BD (columnas lat / lng). Sin coordenadas inventadas.
+            const coords = getCoords(item);
 
-            if (Array.isArray(imagesList) && imagesList.length > 0) {
-              const firstImg = imagesList[0];
-              primaryImage = typeof firstImg === 'string' 
-                ? firstImg 
-                : (firstImg.url || firstImg.image_url || firstImg.secure_url || firstImg.src || null);
-            }
+            // Foto principal (is_main) o la primera disponible
+            const primaryImage = pickMainImage(item.property_images);
 
             return {
               ...item,
               primaryImage,
-              lat: baseLat,
-              lng: baseLng
+              lat: coords?.lat ?? null,
+              lng: coords?.lng ?? null,
+              // Domicilio atomizado -> texto completo (se usa en tarjetas, búsqueda y popup del mapa)
+              address: buildFullAddress(item),
             };
           });
 
@@ -196,7 +191,7 @@ export default function HomePage() {
               {landingProperties.map((prop) => (
                 <a
                   key={prop.id}
-                  href={`/properties/${prop.id}`}
+                  href={propertyPath(prop)}
                   className="w-full md:w-[calc(33.333%-16px)] shrink-0 bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm hover:shadow-xl transition-all duration-300 group flex flex-col justify-between"
                 >
                   {/* Foto de Portada desde Cloudinary */}

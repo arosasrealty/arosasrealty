@@ -5,9 +5,17 @@ import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { jsPDF } from 'jspdf';
+import CopyAddressButton from '@/components/CopyAddressButton';
+import {
+  buildFullAddress,
+  getGoogleEmbedSrc,
+  isShortCode,
+  propertyUrl,
+} from '@/lib/property';
 
 interface Property {
   id: string;
+  short_code?: string | null;
   title: string;
   description: string;
   short_description?: string;
@@ -19,6 +27,8 @@ interface Property {
   bathrooms: number;
   area_sqm: number;
   street?: string;
+  street_number?: string;
+  interior_number?: string;
   neighborhood?: string;
   city?: string;
   state?: string;
@@ -88,10 +98,12 @@ export default function PublicPropertyDetailPage({ params }: PageProps) {
     async function fetchPropertyData() {
       setLoading(true);
 
+      // La ruta acepta el UUID o el ID corto (ej. /properties/ARL-001)
+      const byShortCode = isShortCode(propertyId);
       const { data: propData, error: propError } = await supabase
         .from('properties')
         .select('*')
-        .eq('id', propertyId)
+        .eq(byShortCode ? 'short_code' : 'id', byShortCode ? propertyId.toUpperCase() : propertyId)
         .single();
 
       if (propError || !propData) {
@@ -147,7 +159,7 @@ export default function PublicPropertyDetailPage({ params }: PageProps) {
       const { data: imgData } = await supabase
         .from('property_images')
         .select('id, image_url')
-        .eq('property_id', propertyId);
+        .eq('property_id', propData.id);
 
       setImages(imgData || []);
       setLoading(false);
@@ -204,7 +216,7 @@ export default function PublicPropertyDetailPage({ params }: PageProps) {
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(7.5);
     doc.setTextColor(37, 99, 235); // blue-600
-    const metaBadge = `${(property.category || 'PROPIEDAD').toUpperCase()} • EN ${(property.type || 'VENTA').toUpperCase()} • ESTATUS: ${(property.status || 'DISPONIBLE').toUpperCase()}`;
+    const metaBadge = `${property.short_code ? property.short_code + ' • ' : ''}${(property.category || 'PROPIEDAD').toUpperCase()} • EN ${(property.type || 'VENTA').toUpperCase()} • ESTATUS: ${(property.status || 'DISPONIBLE').toUpperCase()}`;
     doc.text(metaBadge, margin, cursorY);
     cursorY += 5;
 
@@ -216,13 +228,7 @@ export default function PublicPropertyDetailPage({ params }: PageProps) {
     cursorY += splitTitle.length * 5.5 + 2;
 
     // Ubicación / Domicilio Completo
-    const fullAddress = [
-      property.street,
-      property.neighborhood,
-      property.city,
-      property.state,
-      property.postal_code ? `C.P. ${property.postal_code}` : null
-    ].filter(Boolean).join(', ');
+    const fullAddress = buildFullAddress(property);
 
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(8.5);
@@ -461,11 +467,16 @@ export default function PublicPropertyDetailPage({ params }: PageProps) {
 
   const currentMainImage = images.length > 0 ? images[activeImageIndex].image_url : null;
   
-  const fullAddress = [property.street, property.neighborhood, property.city, property.state, property.postal_code]
-    .filter(Boolean)
-    .join(', ');
+  // Domicilio atomizado -> texto completo (misma función que usan catálogo y landing)
+  const fullAddress = buildFullAddress(property);
 
-  const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(`Hola, me interesa la propiedad "${property.title}" ubicada en ${fullAddress || 'su catálogo'} con ID ${property.id}. ¿Podría darme más información?`)}`;
+  // ID corto + enlace directo a esta ficha (WhatsApp lo convierte en hipervínculo)
+  const displayId = property.short_code || property.id;
+  const whatsappMessage =
+    `Hola, me interesa la propiedad "${property.title}" ubicada en ${fullAddress || 'su catálogo'} ` +
+    `con ID ${displayId}: ${propertyUrl(property)}\n` +
+    `¿Podría darme más información?`;
+  const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(whatsappMessage)}`;
   
   const amenitiesArray = Array.isArray(property.amenities) ? property.amenities : [];
   const paymentMethodsArray = Array.isArray(property.payment_methods) ? property.payment_methods : [];
@@ -485,8 +496,16 @@ export default function PublicPropertyDetailPage({ params }: PageProps) {
       <main className="max-w-5xl mx-auto px-6 mt-6 space-y-8">
         {/* Cabecera Principal */}
         <div className="space-y-2 border-b border-slate-200 pb-6">
+          {property.short_code && (
+            <span className="inline-block text-[10px] font-black tracking-wider text-slate-500 bg-slate-100 border border-slate-200 px-2.5 py-1 rounded-lg">
+              ID {property.short_code}
+            </span>
+          )}
           <h1 className="text-3xl font-black text-slate-900">{property.title}</h1>
-          <p className="text-sm text-slate-500 font-medium">📍 {fullAddress || 'Ubicación no especificada'}</p>
+          <div className="flex items-start gap-2 flex-wrap">
+            <p className="text-sm text-slate-500 font-medium">📍 {fullAddress || 'Ubicación no especificada'}</p>
+            <CopyAddressButton text={fullAddress} label="Copiar domicilio" />
+          </div>
         </div>
 
         {/* Galería de Fotos */}
@@ -616,10 +635,24 @@ export default function PublicPropertyDetailPage({ params }: PageProps) {
               </h2>
               
               <div className="space-y-3">
+                {/* Domicilio completo (mismo texto que se envía al mapa) */}
+                <div className="flex items-start justify-between gap-3 bg-slate-50 p-3.5 rounded-2xl border border-slate-100">
+                  <div className="min-w-0">
+                    <span className="text-[10px] font-bold text-slate-400 block">Domicilio completo</span>
+                    <span className="text-xs font-semibold text-slate-800 leading-snug">
+                      {fullAddress || 'No especificado'}
+                    </span>
+                  </div>
+                  <CopyAddressButton text={fullAddress} label="Copiar" />
+                </div>
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs bg-slate-50 p-3.5 rounded-2xl border border-slate-100">
                   <div>
                     <span className="text-[10px] font-bold text-slate-400 block">Calle / Número</span>
-                    <span className="font-semibold text-slate-800">{property.street || 'No especificada'}</span>
+                    <span className="font-semibold text-slate-800">
+                      {[property.street, property.street_number].filter(Boolean).join(' ') || 'No especificada'}
+                      {property.interior_number ? `, Int. ${property.interior_number}` : ''}
+                    </span>
                   </div>
                   <div>
                     <span className="text-[10px] font-bold text-slate-400 block">Colonia</span>
@@ -649,11 +682,7 @@ export default function PublicPropertyDetailPage({ params }: PageProps) {
                     height="100%"
                     style={{ border: 0 }}
                     loading="lazy"
-                    src={
-                      property.lat && property.lng
-                        ? `https://maps.google.com/maps?q=${property.lat},${property.lng}&z=16&output=embed`
-                        : `https://maps.google.com/maps?q=${encodeURIComponent(fullAddress || 'Mexico City')}&z=15&output=embed`
-                    }
+                    src={getGoogleEmbedSrc(property)}
                   />
                 </div>
               </div>

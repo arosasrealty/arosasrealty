@@ -4,16 +4,16 @@ import { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { supabase } from '@/lib/supabase';
 import Link from 'next/link';
+import CopyAddressButton from '@/components/CopyAddressButton';
+import {
+  buildFullAddress,
+  getCoords,
+  pickMainImage,
+  propertyPath,
+} from '@/lib/property';
 
 // Carga dinámica del mapa (sin SSR)
 const PropertyMap = dynamic(() => import('@/components/Map'), { ssr: false });
-
-// Coordenadas de respaldo por defecto
-const DEFAULT_COORDS = [
-  { lat: 19.4326, lng: -99.1913 }, // Polanco
-  { lat: 19.4270, lng: -99.1620 }, // Cuauhtémoc
-  { lat: 19.3980, lng: -99.2450 }, // Bosques
-];
 
 // Función utilitaria para calcular la edad de publicación (Formato amigable)
 function getRelativeTime(dateString?: string): string {
@@ -48,16 +48,29 @@ function getRelativeTime(dateString?: string): string {
 // Interfaz adaptada con el campo created_at
 interface CatalogueProperty {
   id: string;
+  short_code?: string | null;
   title: string;
   type: string; // 'venta' | 'renta'
   category?: string;
   price: number;
   currency?: string;
+  street?: string;
+  street_number?: string;
+  interior_number?: string;
   neighborhood?: string;
   city?: string;
-  address?: string;
-  lat: number;
-  lng: number;
+  state?: string;
+  postal_code?: string;
+  address: string; // domicilio completo armado con buildFullAddress()
+  lat: number | null;
+  lng: number | null;
+  bedrooms?: number;
+  bathrooms?: number;
+  parking_spaces?: number;
+  levels?: number;
+  area_sqm?: number;
+  land_area_sqm?: number;
+  mainImage: string | null;
   status?: string;
   created_at?: string;
 }
@@ -80,17 +93,21 @@ export default function CataloguePage() {
       try {
         const { data, error } = await supabase
           .from('properties')
-          .select('*')
+          .select('*, property_images!property_images_property_id_fkey(id, image_url, is_main)')
           .eq('status', 'disponible')
           .order('created_at', { ascending: false }); // Carga inicial por más reciente
 
         if (!error && data && data.length > 0) {
-          const formatted: CatalogueProperty[] = data.map((item: any, idx: number) => ({
-            ...item,
-            address: item.address || [item.neighborhood, item.city || 'CDMX'].filter(Boolean).join(', '),
-            lat: typeof item.lat === 'number' ? item.lat : DEFAULT_COORDS[idx % DEFAULT_COORDS.length].lat,
-            lng: typeof item.lng === 'number' ? item.lng : DEFAULT_COORDS[idx % DEFAULT_COORDS.length].lng,
-          }));
+          const formatted: CatalogueProperty[] = data.map((item: any) => {
+            const coords = getCoords(item);
+            return {
+              ...item,
+              address: buildFullAddress(item),
+              lat: coords?.lat ?? null,
+              lng: coords?.lng ?? null,
+              mainImage: pickMainImage(item.property_images),
+            };
+          });
 
           setProperties(formatted);
           setFilteredProperties(formatted);
@@ -122,6 +139,7 @@ export default function CataloguePage() {
       result = result.filter(
         (p) =>
           p.title?.toLowerCase().includes(term) ||
+          p.short_code?.toLowerCase().includes(term) ||
           p.address?.toLowerCase().includes(term) ||
           p.neighborhood?.toLowerCase().includes(term)
       );
@@ -175,7 +193,7 @@ export default function CataloguePage() {
           {/* Buscador de texto */}
           <input
             type="text"
-            placeholder="Buscar por título, colonia o zona..."
+            placeholder="Buscar por título, colonia, zona o ID (ARL-001)..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="flex-1 bg-slate-50 border border-slate-200 text-xs text-slate-800 rounded-xl px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500/20 font-medium"
@@ -227,12 +245,21 @@ export default function CataloguePage() {
               const isVenta = prop.type?.toLowerCase() === 'venta';
               const publicationAge = getRelativeTime(prop.created_at);
 
+              const features = [
+                { icon: '🛏️', text: `${prop.bedrooms ?? 0} rec` },
+                { icon: '🚿', text: `${prop.bathrooms ?? 0} baños` },
+                { icon: '🚗', text: `${prop.parking_spaces ?? 0} est.` },
+                { icon: '🏢', text: `${prop.levels ?? 1} niv` },
+                { icon: '📐', text: `Const: ${prop.area_sqm ?? 0} m²` },
+                { icon: '🌱', text: `Terreno: ${prop.land_area_sqm ?? 0} m²` },
+              ];
+
               return (
                 <div
                   key={prop.id}
-                  className="bg-white border border-slate-200/80 rounded-3xl p-6 shadow-sm hover:shadow-md transition flex flex-col justify-between h-[200px]"
+                  className="bg-white border border-slate-200/80 rounded-3xl p-5 shadow-sm hover:shadow-md transition flex flex-col gap-3"
                 >
-                  {/* Fila Superior: Badge + Edad de Publicación + Enlace Ficha */}
+                  {/* Fila Superior: Badge + ID corto + Enlace Ficha */}
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <span
@@ -244,24 +271,60 @@ export default function CataloguePage() {
                       >
                         {prop.type || 'VENTA'}
                       </span>
+                      {prop.short_code && (
+                        <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-1 rounded-md">
+                          {prop.short_code}
+                        </span>
+                      )}
                     </div>
 
                     <Link
-                      href={`/properties/${prop.id}`}
+                      href={propertyPath(prop)}
                       className="text-xs font-bold text-slate-400 hover:text-slate-900 transition flex items-center gap-1"
                     >
                       Ver Ficha <span className="text-sm">→</span>
                     </Link>
                   </div>
 
-                  {/* Título y Ubicación */}
-                  <div className="space-y-1">
-                    <h3 className="text-lg font-black text-slate-900 line-clamp-1">
-                      {prop.title}
-                    </h3>
-                    <p className="text-xs font-medium text-slate-400 line-clamp-1">
-                      {prop.address || 'Ubicación no especificada'}
-                    </p>
+                  {/* Foto miniatura + Título y domicilio */}
+                  <div className="flex gap-3">
+                    <Link
+                      href={propertyPath(prop)}
+                      className="w-24 h-24 rounded-2xl overflow-hidden bg-slate-100 shrink-0 flex items-center justify-center border border-slate-200"
+                    >
+                      {prop.mainImage ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={prop.mainImage}
+                          alt={prop.title}
+                          loading="lazy"
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <span className="text-2xl opacity-40">🏠</span>
+                      )}
+                    </Link>
+
+                    <div className="min-w-0 flex-1 space-y-1">
+                      <h3 className="text-base font-black text-slate-900 line-clamp-2 leading-tight">
+                        {prop.title}
+                      </h3>
+                      <div className="flex items-start gap-1.5">
+                        <p className="text-[11px] font-medium text-slate-500 leading-snug flex-1">
+                          <span>📍</span> {prop.address || 'Ubicación no especificada'}
+                        </p>
+                        <CopyAddressButton text={prop.address} label="Copiar" />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Iconos de características */}
+                  <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] font-semibold text-slate-600">
+                    {features.map((f) => (
+                      <span key={f.text} className="inline-flex items-center gap-1">
+                        <span>{f.icon}</span> {f.text}
+                      </span>
+                    ))}
                   </div>
 
                   {/* Fila Inferior: Precio y Fecha Relativa */}
@@ -275,7 +338,6 @@ export default function CataloguePage() {
                       </span>
                     </div>
 
-                    {/* Badge discreto de antigüedad */}
                     <span className="text-[10px] font-semibold text-slate-400 bg-slate-100 px-2.5 py-1 rounded-md">
                       🕒 {publicationAge}
                     </span>

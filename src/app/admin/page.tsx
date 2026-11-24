@@ -4,9 +4,13 @@ import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { buildFullAddress } from '@/lib/property';
 
 interface Property {
   id: string;
+  short_code?: string;
+  street_number?: string;
+  interior_number?: string;
   title: string;
   type: string;
   category: string;
@@ -143,9 +147,16 @@ export default function AdminDashboardPage() {
                       )}
                     </div>
 
-                    <h3 className="text-base font-black text-slate-900">{prop.title}</h3>
+                    <h3 className="text-base font-black text-slate-900">
+                      {prop.short_code && (
+                        <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-md mr-2 align-middle">
+                          {prop.short_code}
+                        </span>
+                      )}
+                      {prop.title}
+                    </h3>
                     <p className="text-xs text-slate-500">
-                      📍 {[prop.street, prop.neighborhood, prop.city, prop.state].filter(Boolean).join(', ') || 'Sin dirección registrada'}
+                      📍 {buildFullAddress(prop) || 'Sin dirección registrada'}
                     </p>
 
                     <div className="flex gap-4 text-xs font-semibold text-slate-600 pt-1 flex-wrap">
