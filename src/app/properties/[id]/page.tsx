@@ -9,8 +9,12 @@ import CopyAddressButton from '@/components/CopyAddressButton';
 import {
   buildFullAddress,
   getGoogleEmbedSrc,
+  getSpaceEntries,
   isShortCode,
+  normalizeState,
   propertyUrl,
+  resolveLocation,
+  WHATSAPP_NUMBER,
 } from '@/lib/property';
 
 interface Property {
@@ -41,6 +45,7 @@ interface Property {
   levels: number;
   land_area_sqm: number;
   extra_spaces?: string[];
+  space_counts?: Record<string, number>;
   payment_methods?: string[] | string;
   publishing_agent?: string;
   created_at?: string;
@@ -307,11 +312,15 @@ export default function PublicPropertyDetailPage({ params }: PageProps) {
 
     cursorY += boxHeight * 2 + 4;
 
-    if (Array.isArray(property.extra_spaces) && property.extra_spaces.length > 0) {
+    const spaceEntries = getSpaceEntries(property);
+    if (spaceEntries.length > 0) {
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(8);
       doc.setTextColor(51, 65, 85);
-      const spacesLines = doc.splitTextToSize(`Espacios adicionales: ${property.extra_spaces.join(', ')}`, contentWidth);
+      const spacesLines = doc.splitTextToSize(
+        `Espacios adicionales: ${spaceEntries.map(([name, n]) => `${name} (${n})`).join(', ')}`,
+        contentWidth
+      );
       doc.text(spacesLines, margin, cursorY + 3);
       cursorY += spacesLines.length * 4 + 3;
     }
@@ -487,7 +496,9 @@ export default function PublicPropertyDetailPage({ params }: PageProps) {
     `Hola, me interesa la propiedad "${property.title}" ubicada en ${fullAddress || 'su catálogo'} ` +
     `con ID ${displayId}: ${propertyUrl(property)}\n` +
     `¿Podría darme más información?`;
-  const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(whatsappMessage)}`;
+  // wa.me con el número del negocio: abre directo el chat con WhatsApp Business (web y móvil)
+  const whatsappUrl = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(whatsappMessage)}`;
+  const location = resolveLocation(property.city, property.state);
   
   const amenitiesArray = Array.isArray(property.amenities) ? property.amenities : [];
   const paymentMethodsArray = Array.isArray(property.payment_methods) ? property.payment_methods : [];
@@ -620,15 +631,16 @@ export default function PublicPropertyDetailPage({ params }: PageProps) {
                 </div>
               </div>
 
-              {Array.isArray(property.extra_spaces) && property.extra_spaces.length > 0 && (
-                <div className="pt-2 border-t border-slate-100 flex flex-wrap gap-1.5">
-                  {property.extra_spaces.map((space) => (
-                    <span
+              {getSpaceEntries(property).length > 0 && (
+                <div className="pt-2 border-t border-slate-100 grid grid-cols-2 sm:grid-cols-3 gap-x-2.5 gap-y-1.5 text-center">
+                  {getSpaceEntries(property).map(([space, count]) => (
+                    <div
                       key={space}
-                      className="text-xs font-semibold bg-slate-100 text-slate-700 px-3 py-1.5 rounded-xl border border-slate-200 flex items-center gap-1.5"
+                      className="bg-slate-50 py-1.5 px-3 rounded-xl border border-slate-100 flex flex-col justify-center"
                     >
-                      <span className="text-emerald-600 font-bold">✓</span> {space}
-                    </span>
+                      <span className="text-xs font-bold text-slate-500 leading-tight">{space}</span>
+                      <span className="text-base font-black text-slate-900 leading-tight mt-0.5">{count}</span>
+                    </div>
                   ))}
                 </div>
               )}
@@ -659,18 +671,13 @@ export default function PublicPropertyDetailPage({ params }: PageProps) {
               </h2>
               
               <div className="space-y-3">
-                {/* Domicilio completo (mismo texto que se envía al mapa) */}
-                <div className="flex items-start justify-between gap-3 bg-slate-50 p-3.5 rounded-2xl border border-slate-100">
-                  <div className="min-w-0">
-                    <span className="text-[10px] font-bold text-slate-400 block">Domicilio completo</span>
-                    <span className="text-xs font-semibold text-slate-800 leading-snug">
-                      {fullAddress || 'No especificado'}
-                    </span>
-                  </div>
-                  <CopyAddressButton text={fullAddress} label="Copiar" />
+                <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-100 space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Domicilio</span>
+                  {/* Copia: Av. Popocatépetl, No. 415, Col. Santa Cruz Atoyac, Alcaldía Benito Juárez, C.P. 03310, Ciudad de México */}
+                  <CopyAddressButton text={fullAddress} label="Copiar domicilio" />
                 </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs bg-slate-50 p-3.5 rounded-2xl border border-slate-100">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                   <div>
                     <span className="text-[10px] font-bold text-slate-400 block">Calle / Número</span>
                     <span className="font-semibold text-slate-800">
@@ -683,13 +690,18 @@ export default function PublicPropertyDetailPage({ params }: PageProps) {
                     <span className="font-semibold text-slate-800">{property.neighborhood || 'No especificada'}</span>
                   </div>
                   <div>
-                    <span className="text-[10px] font-bold text-slate-400 block">Alcaldía / Ciudad</span>
-                    <span className="font-semibold text-slate-800">{property.city || 'CDMX'}</span>
+                    <span className="text-[10px] font-bold text-slate-400 block">Alcaldía / Municipio</span>
+                    <span className="font-semibold text-slate-800">{location.city || 'No especificada'}</span>
                   </div>
                   <div>
-                    <span className="text-[10px] font-bold text-slate-400 block">Estado / C.P.</span>
-                    <span className="font-semibold text-slate-800">{property.state || 'CDMX'} {property.postal_code ? `(C.P. ${property.postal_code})` : ''}</span>
+                    <span className="text-[10px] font-bold text-slate-400 block">Estado</span>
+                    <span className="font-semibold text-slate-800">{location.state || 'No especificado'}</span>
                   </div>
+                  <div>
+                    <span className="text-[10px] font-bold text-slate-400 block">C.P.</span>
+                    <span className="font-semibold text-slate-800">{property.postal_code || 'No especificado'}</span>
+                  </div>
+                </div>
                 </div>
 
                 {(property.lat || property.lng) && (

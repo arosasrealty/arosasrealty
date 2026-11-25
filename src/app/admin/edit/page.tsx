@@ -4,7 +4,7 @@ import { useEffect, useState, Suspense } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { geocodeAddress, EXTRA_SPACES } from '@/lib/property';
+import { geocodeAddress, EXTRA_SPACES, MX_STATES, normalizeState, parseSpaceCounts, resolveLocation } from '@/lib/property';
 
 interface PropertyForm {
   id?: string;
@@ -33,7 +33,7 @@ interface PropertyForm {
   parking_spaces: number;
   levels: number;
   land_area_sqm: number;
-  extra_spaces: string[];
+  space_counts: Record<string, number>;
   publishing_agent: string;
   payment_methods: string[]; // Formas de Pago / Financiamiento
 }
@@ -86,6 +86,7 @@ function EditPropertyContent() {
   const [saving, setSaving] = useState<boolean>(false);
   const [geocoding, setGeocoding] = useState<boolean>(false);
   const [geoError, setGeoError] = useState<string | null>(null);
+  const [geoNote, setGeoNote] = useState<string | null>(null);
   const [newAmenityInput, setNewAmenityInput] = useState<string>('');
 
   // Estado para controlar el Modal Personalizado
@@ -114,8 +115,8 @@ function EditPropertyContent() {
     street_number: '',
     interior_number: '',
     neighborhood: '',
-    city: 'CDMX',
-    state: 'CDMX',
+    city: '',
+    state: 'Ciudad de México',
     postal_code: '',
     status: 'disponible',
     short_description: '',
@@ -124,7 +125,7 @@ function EditPropertyContent() {
     parking_spaces: 0,
     levels: 1,
     land_area_sqm: 0,
-    extra_spaces: [],
+    space_counts: {},
     lat: null,
     lng: null,
     publishing_agent: 'ARR',
@@ -203,8 +204,8 @@ function EditPropertyContent() {
             street_number: data.street_number || '',
             interior_number: data.interior_number || '',
             neighborhood: data.neighborhood || '',
-            city: data.city || 'CDMX',
-            state: data.state || 'CDMX',
+            city: resolveLocation(data.city, data.state).city,
+            state: resolveLocation(data.city, data.state).state,
             postal_code: data.postal_code || '',
             status: data.status || 'disponible',
             short_description: data.short_description || '',
@@ -213,7 +214,7 @@ function EditPropertyContent() {
             parking_spaces: data.parking_spaces ?? 0,
             levels: data.levels ?? 1,
             land_area_sqm: data.land_area_sqm ?? 0,
-            extra_spaces: Array.isArray(data.extra_spaces) ? data.extra_spaces : [],
+            space_counts: parseSpaceCounts(data),
             lat: data.lat ?? null,
             lng: data.lng ?? null,
             publishing_agent: agentVal,
@@ -236,20 +237,31 @@ function EditPropertyContent() {
 
   const handleFetchCoordinates = async () => {
     setGeoError(null);
+    setGeoNote(null);
 
     if (!form.street.trim() && !form.postal_code.trim()) {
-      setGeoError('Por favor escribe al menos la calle o el código postal para buscar la ubicación.');
+      setGeoError('Escribe al menos la Calle o el Código postal para buscar la ubicación.');
+      return;
+    }
+    if (!form.state.trim()) {
+      setGeoError('Selecciona el Estado: sin él, una calle puede coincidir con otra del mismo nombre en otro estado.');
       return;
     }
 
     setGeocoding(true);
     try {
-      // Usa el domicilio atomizado (calle, número, colonia, alcaldía, estado, C.P.)
+      // Envía el domicilio al mapa con el formato que lo recibe:
+      // "Avenida Popocatépetl 415, Santa Cruz Atoyac, Benito Juárez, 03310, Ciudad de México, México"
       const result = await geocodeAddress(form);
       if (result) {
         setForm(prev => ({ ...prev, lat: result.lat, lng: result.lng }));
+        if (result.precision === 'street') {
+          setGeoNote('Se ubicó la calle, pero no el número exacto. Revisa el pin en el mapa y ajusta Latitud/Longitud si hace falta.');
+        } else if (result.precision === 'area') {
+          setGeoNote('Ubicación aproximada (por Código postal). Revisa el pin en el mapa y ajusta Latitud/Longitud si hace falta.');
+        }
       } else {
-        setGeoError('No se encontraron coordenadas para esta dirección. Prueba simplificando la colonia o ajustando la calle.');
+        setGeoError('No se encontraron coordenadas. Verifica que Calle, Colonia, Alcaldía / Municipio, Estado y C.P. estén en el campo que les corresponde.');
       }
     } catch (err) {
       console.error(err);
@@ -335,7 +347,7 @@ function EditPropertyContent() {
       parking_spaces: Number(form.parking_spaces) || 0,
       levels: Number(form.levels) || 1,
       land_area_sqm: Number(form.land_area_sqm) || 0,
-      extra_spaces: form.extra_spaces,
+      space_counts: Object.fromEntries(Object.entries(form.space_counts).filter(([, n]) => n > 0)),
       lat: form.lat !== null && !isNaN(Number(form.lat)) ? Number(form.lat) : null,
       lng: form.lng !== null && !isNaN(Number(form.lng)) ? Number(form.lng) : null,
       publishing_agent: form.publishing_agent || 'ARR',
@@ -509,34 +521,31 @@ function EditPropertyContent() {
               </div>
             </div>
 
-            {/* Espacios adicionales */}
+            {/* Espacios adicionales (cantidad de cada uno) */}
             <div className="space-y-1.5 pt-1">
               <span className="text-[11px] font-bold text-slate-600 block">Espacios adicionales</span>
-              <div className="flex flex-wrap gap-1.5">
-                {EXTRA_SPACES.map((space) => {
-                  const selected = form.extra_spaces.includes(space);
-                  return (
-                    <button
-                      key={space}
-                      type="button"
-                      onClick={() =>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
+                {EXTRA_SPACES.map((space) => (
+                  <div key={space}>
+                    <label className="text-[11px] font-bold text-slate-600 block mb-1">{space}</label>
+                    <input
+                      type="number"
+                      min={0}
+                      placeholder="0"
+                      value={form.space_counts[space] ? form.space_counts[space] : ''}
+                      onChange={(e) =>
                         setForm({
                           ...form,
-                          extra_spaces: selected
-                            ? form.extra_spaces.filter((s) => s !== space)
-                            : [...form.extra_spaces, space],
+                          space_counts: {
+                            ...form.space_counts,
+                            [space]: e.target.value === '' ? 0 : Math.max(0, Math.floor(Number(e.target.value))),
+                          },
                         })
                       }
-                      className={`text-[11px] font-semibold px-3 py-1.5 rounded-xl border transition ${
-                        selected
-                          ? 'bg-slate-900 border-slate-900 text-white'
-                          : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-100'
-                      }`}
-                    >
-                      {selected ? '✓ ' : '+ '}{space}
-                    </button>
-                  );
-                })}
+                      className="w-full text-xs font-medium p-2.5 bg-white rounded-xl border border-slate-300 focus:outline-none focus:border-blue-600 text-center sm:text-left"
+                    />
+                  </div>
+                ))}
               </div>
             </div>
           </div>
@@ -622,86 +631,120 @@ function EditPropertyContent() {
               📍 Ubicación, Coordenadas y Mapa
             </span>
 
-            {/* Fila 1a: Calle | Núm. exterior | Núm. interior */}
+            {/* Fila 1: Calle | Núm. exterior | Núm. interior */}
             <div className="grid grid-cols-1 sm:grid-cols-[1fr_120px_120px] gap-3">
-              <input
-                type="text"
-                placeholder="Calle (ej. Av. México Coyoacán)"
-                value={form.street}
-                onChange={(e) => {
-                  setForm({ ...form, street: e.target.value });
-                  setGeoError(null);
-                }}
-                className="text-xs font-medium p-2.5 bg-white rounded-xl border border-slate-300 focus:outline-none focus:border-blue-600"
-              />
-              <input
-                type="text"
-                placeholder="Núm. exterior"
-                value={form.street_number}
-                onChange={(e) => {
-                  setForm({ ...form, street_number: e.target.value });
-                  setGeoError(null);
-                }}
-                className="text-xs font-medium p-2.5 bg-white rounded-xl border border-slate-300 focus:outline-none focus:border-blue-600"
-              />
-              <input
-                type="text"
-                placeholder="Núm. interior"
-                value={form.interior_number}
-                onChange={(e) => {
-                  setForm({ ...form, interior_number: e.target.value });
-                  setGeoError(null);
-                }}
-                className="text-xs font-medium p-2.5 bg-white rounded-xl border border-slate-300 focus:outline-none focus:border-blue-600"
-              />
+              <div>
+                <label className="text-[10px] font-bold text-slate-500 block mb-1">Calle</label>
+                <input
+                  type="text"
+                  placeholder="ej. Av. Popocatépetl"
+                  value={form.street}
+                  onChange={(e) => {
+                    setForm({ ...form, street: e.target.value });
+                    setGeoError(null);
+                    setGeoNote(null);
+                  }}
+                  className="w-full text-xs font-medium p-2.5 bg-white rounded-xl border border-slate-300 focus:outline-none focus:border-blue-600"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-500 block mb-1">Núm. exterior</label>
+                <input
+                  type="text"
+                  placeholder="ej. 415"
+                  value={form.street_number}
+                  onChange={(e) => {
+                    setForm({ ...form, street_number: e.target.value });
+                    setGeoError(null);
+                    setGeoNote(null);
+                  }}
+                  className="w-full text-xs font-medium p-2.5 bg-white rounded-xl border border-slate-300 focus:outline-none focus:border-blue-600"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-500 block mb-1">Núm. interior</label>
+                <input
+                  type="text"
+                  placeholder="ej. 12"
+                  value={form.interior_number}
+                  onChange={(e) => {
+                    setForm({ ...form, interior_number: e.target.value });
+                    setGeoError(null);
+                    setGeoNote(null);
+                  }}
+                  className="w-full text-xs font-medium p-2.5 bg-white rounded-xl border border-slate-300 focus:outline-none focus:border-blue-600"
+                />
+              </div>
             </div>
 
-            {/* Fila 1b: Colonia */}
+            {/* Fila 2: Colonia */}
             <div className="grid grid-cols-1 gap-3">
-              <input
-                type="text"
-                placeholder="Colonia"
-                value={form.neighborhood}
-                onChange={(e) => {
-                  setForm({ ...form, neighborhood: e.target.value });
-                  setGeoError(null);
-                }}
-                className="text-xs font-medium p-2.5 bg-white rounded-xl border border-slate-300 focus:outline-none focus:border-blue-600"
-              />
+              <div>
+                <label className="text-[10px] font-bold text-slate-500 block mb-1">Colonia</label>
+                <input
+                  type="text"
+                  placeholder="ej. Santa Cruz Atoyac"
+                  value={form.neighborhood}
+                  onChange={(e) => {
+                    setForm({ ...form, neighborhood: e.target.value });
+                    setGeoError(null);
+                    setGeoNote(null);
+                  }}
+                  className="w-full text-xs font-medium p-2.5 bg-white rounded-xl border border-slate-300 focus:outline-none focus:border-blue-600"
+                />
+              </div>
             </div>
 
-            {/* Fila 2: Alcaldía/Ciudad | Estado | Código Postal */}
-            <div className="flex flex-col sm:flex-row gap-3">
-              <input
-                type="text"
-                placeholder="Alcaldía / Ciudad"
-                value={form.city}
-                onChange={(e) => {
-                  setForm({ ...form, city: e.target.value });
-                  setGeoError(null);
-                }}
-                className="flex-1 text-xs font-medium p-2.5 bg-white rounded-xl border border-slate-300 focus:outline-none focus:border-blue-600"
-              />
-              <input
-                type="text"
-                placeholder="Estado (ej. CDMX, Estado de México)"
-                value={form.state}
-                onChange={(e) => {
-                  setForm({ ...form, state: e.target.value });
-                  setGeoError(null);
-                }}
-                className="flex-1 text-xs font-medium p-2.5 bg-white rounded-xl border border-slate-300 focus:outline-none focus:border-blue-600"
-              />
-              <input
-                type="text"
-                placeholder="Código Postal"
-                value={form.postal_code}
-                onChange={(e) => {
-                  setForm({ ...form, postal_code: e.target.value });
-                  setGeoError(null);
-                }}
-                className="w-full sm:w-36 text-xs font-medium p-2.5 bg-white rounded-xl border border-slate-300 focus:outline-none focus:border-blue-600"
-              />
+            {/* Fila 3: Alcaldía / Municipio | Estado | C.P. */}
+            <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_140px] gap-3">
+              <div>
+                <label className="text-[10px] font-bold text-slate-500 block mb-1">Alcaldía / Municipio</label>
+                <input
+                  type="text"
+                  placeholder="ej. Benito Juárez"
+                  value={form.city}
+                  onChange={(e) => {
+                    setForm({ ...form, city: e.target.value });
+                    setGeoError(null);
+                    setGeoNote(null);
+                  }}
+                  className="w-full text-xs font-medium p-2.5 bg-white rounded-xl border border-slate-300 focus:outline-none focus:border-blue-600"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-500 block mb-1">Estado</label>
+                <select
+                  value={normalizeState(form.state)}
+                  onChange={(e) => {
+                    setForm({ ...form, state: e.target.value });
+                    setGeoError(null);
+                    setGeoNote(null);
+                  }}
+                  className="w-full text-xs font-medium p-2.5 bg-white rounded-xl border border-slate-300 focus:outline-none focus:border-blue-600"
+                >
+                  <option value="">Selecciona un estado</option>
+                  {form.state && !MX_STATES.includes(normalizeState(form.state)) && (
+                    <option value={form.state}>{form.state}</option>
+                  )}
+                  {MX_STATES.map((st) => (
+                    <option key={st} value={st}>{st}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-500 block mb-1">Código postal</label>
+                <input
+                  type="text"
+                  placeholder="ej. 03310"
+                  value={form.postal_code}
+                  onChange={(e) => {
+                    setForm({ ...form, postal_code: e.target.value });
+                    setGeoError(null);
+                    setGeoNote(null);
+                  }}
+                  className="w-full text-xs font-medium p-2.5 bg-white rounded-xl border border-slate-300 focus:outline-none focus:border-blue-600"
+                />
+              </div>
             </div>
 
             {/* Fila 3: Latitud | Longitud | Botón */}
@@ -716,6 +759,7 @@ function EditPropertyContent() {
                   onChange={(e) => {
                     setForm({ ...form, lat: e.target.value ? Number(e.target.value) : null });
                     setGeoError(null);
+                  setGeoNote(null);
                   }}
                   className="w-full text-xs font-medium p-2.5 bg-white rounded-xl border border-slate-300 focus:outline-none focus:border-blue-600"
                 />
@@ -731,6 +775,7 @@ function EditPropertyContent() {
                   onChange={(e) => {
                     setForm({ ...form, lng: e.target.value ? Number(e.target.value) : null });
                     setGeoError(null);
+                  setGeoNote(null);
                   }}
                   className="w-full text-xs font-medium p-2.5 bg-white rounded-xl border border-slate-300 focus:outline-none focus:border-blue-600"
                 />
@@ -748,6 +793,12 @@ function EditPropertyContent() {
                 </button>
               </div>
             </div>
+
+            {geoNote && !geoError && (
+              <p className="text-[11px] font-semibold text-amber-800 bg-amber-50 border border-amber-200 rounded-xl p-2.5">
+                ⚠️ {geoNote}
+              </p>
+            )}
 
             {/* Mapa o Mensaje de Error */}
             {geoError ? (

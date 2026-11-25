@@ -4,12 +4,15 @@
 export const SITE_URL =
   process.env.NEXT_PUBLIC_SITE_URL || 'https://arosasrealty-sigma.vercel.app';
 
+export const WHATSAPP_NUMBER =
+  process.env.NEXT_PUBLIC_WHATSAPP_NUMBER || '525544857098'; // WhatsApp Business de Arosas Realty
+
 export interface AddressParts {
   street?: string | null;          // Calle (sin número)
   street_number?: string | null;   // Número exterior
   interior_number?: string | null; // Número interior
   neighborhood?: string | null;    // Colonia
-  city?: string | null;            // Alcaldía / Municipio / Ciudad
+  city?: string | null;            // Alcaldía / Municipio
   state?: string | null;           // Estado
   postal_code?: string | null;     // C.P.
 }
@@ -17,49 +20,117 @@ export interface AddressParts {
 const clean = (v?: string | number | null): string => (v ?? '').toString().trim();
 
 const normalize = (v: string): string =>
-  v.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[.,]/g, '').trim();
+  v.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[.,]/g, '').replace(/\s+/g, ' ').trim();
 
-/** "Av. México Coyoacán 123" (con número exterior, si existe) */
-export function buildStreetLine(p: AddressParts, withInterior = true): string {
+// ---------- Estados ----------
+export const MX_STATES = [
+  'Aguascalientes', 'Baja California', 'Baja California Sur', 'Campeche', 'Chiapas', 'Chihuahua',
+  'Ciudad de México', 'Coahuila', 'Colima', 'Durango', 'Estado de México', 'Guanajuato', 'Guerrero',
+  'Hidalgo', 'Jalisco', 'Michoacán', 'Morelos', 'Nayarit', 'Nuevo León', 'Oaxaca', 'Puebla', 'Querétaro',
+  'Quintana Roo', 'San Luis Potosí', 'Sinaloa', 'Sonora', 'Tabasco', 'Tamaulipas', 'Tlaxcala', 'Veracruz',
+  'Yucatán', 'Zacatecas',
+];
+
+const STATE_ALIASES: Record<string, string> = {
+  cdmx: 'Ciudad de México',
+  df: 'Ciudad de México',
+  'distrito federal': 'Ciudad de México',
+  'mexico city': 'Ciudad de México',
+  'ciudad de mexico': 'Ciudad de México',
+  edomex: 'Estado de México',
+  'edo de mexico': 'Estado de México',
+  'edo mex': 'Estado de México',
+  'estado de mexico': 'Estado de México',
+  'coahuila de zaragoza': 'Coahuila',
+  'michoacan de ocampo': 'Michoacán',
+  'veracruz de ignacio de la llave': 'Veracruz',
+};
+
+/** Devuelve el nombre oficial del estado ("CDMX" -> "Ciudad de México"); si no lo reconoce, regresa el texto tal cual */
+export function normalizeState(v?: string | null): string {
+  const raw = clean(v);
+  if (!raw) return '';
+  const n = normalize(raw);
+  if (STATE_ALIASES[n]) return STATE_ALIASES[n];
+  const found = MX_STATES.find((s) => normalize(s) === n);
+  return found || raw;
+}
+
+const isKnownState = (v: string) => MX_STATES.includes(normalizeState(v));
+export const isCdmx = (state?: string | null) => normalizeState(state) === 'Ciudad de México';
+
+/**
+ * Acomoda Alcaldía/Municipio y Estado. Corrige datos viejos o capturados al revés
+ * (ej. city="CDMX", state="Benito Juárez" -> city="Benito Juárez", state="Ciudad de México").
+ */
+export function resolveLocation(cityRaw?: string | null, stateRaw?: string | null): { city: string; state: string } {
+  let city = clean(cityRaw);
+  const stateIn = clean(stateRaw);
+  if (!isKnownState(stateIn) && isKnownState(city)) {
+    return { city: stateIn, state: normalizeState(city) };
+  }
+  const state = normalizeState(stateIn);
+  if (city && isCdmx(state) && normalizeState(city) === state) city = ''; // "CDMX" no es una alcaldía
+  return { city, state };
+}
+
+// ---------- Calle ----------
+const STREET_TYPES: [RegExp, string][] = [
+  [/^av\.?\s+/i, 'Avenida '],
+  [/^avenida\s+/i, 'Avenida '],
+  [/^blvd\.?\s+/i, 'Boulevard '],
+  [/^calz\.?\s+/i, 'Calzada '],
+  [/^cda\.?\s+/i, 'Cerrada '],
+  [/^priv\.?\s+/i, 'Privada '],
+  [/^prol\.?\s+/i, 'Prolongación '],
+];
+const expandStreet = (s: string) => {
+  for (const [re, rep] of STREET_TYPES) if (re.test(s)) return s.replace(re, rep);
+  return s;
+};
+const bareStreet = (s: string) =>
+  s.replace(/^(av\.?|avenida|blvd\.?|boulevard|calz\.?|calzada|calle|cda\.?|cerrada|priv\.?|privada|prol\.?|prolongaci[oó]n)\s+/i, '');
+
+const stripPrefix = (v: string, re: RegExp) => v.replace(re, '').trim();
+
+/**
+ * Domicilio completo para MOSTRAR, COPIAR y enviar por WhatsApp:
+ * "Av. Popocatépetl, No. 415, Col. Santa Cruz Atoyac, Alcaldía Benito Juárez, C.P. 03310, Ciudad de México"
+ */
+export function buildFullAddress(p: AddressParts): string {
   const street = clean(p.street);
   const ext = clean(p.street_number);
   const int = clean(p.interior_number);
-  let line = street;
-  if (ext) line = `${line} ${ext}`.trim();
-  if (withInterior && int) line = `${line}, Int. ${int}`.trim();
-  return line;
-}
-
-/** Domicilio completo para MOSTRAR y COPIAR: "Av. X 123, Int. 4, Xoco, Benito Juárez, CDMX, C.P. 03330" */
-export function buildFullAddress(p: AddressParts): string {
-  const parts: string[] = [];
-  const push = (v: string) => {
-    if (!v) return;
-    if (parts.some((x) => normalize(x) === normalize(v))) return; // evita "CDMX, CDMX"
-    parts.push(v);
-  };
-  push(buildStreetLine(p));
-  push(clean(p.neighborhood));
-  push(clean(p.city));
-  push(clean(p.state));
+  const colonia = stripPrefix(clean(p.neighborhood), /^col(onia)?\.?\s+/i);
+  const { city: cityRaw, state } = resolveLocation(p.city, p.state);
+  const city = stripPrefix(cityRaw, /^(alcald[ií]a|municipio|del\.?|delegaci[oó]n)\s+/i);
   const cp = clean(p.postal_code);
+
+  const parts: string[] = [];
+  if (street) parts.push(street);
+  if (ext) parts.push(`No. ${ext}`);
+  if (int) parts.push(`Int. ${int}`);
+  if (colonia) parts.push(`Col. ${colonia}`);
+  if (city) parts.push(`${state ? (isCdmx(state) ? 'Alcaldía ' : 'Municipio ') : ''}${city}`);
   if (cp) parts.push(`C.P. ${cp}`);
+  if (state) parts.push(state);
   return parts.join(', ');
 }
 
-/** Cadena que consumen los mapas / geocodificador (sin "Int." ni "C.P.") */
-export function buildMapQuery(p: AddressParts): string {
+/** Línea que consumen los mapas / geocodificador: "Avenida Popocatépetl 415, Santa Cruz Atoyac, Benito Juárez, 03310, Ciudad de México, México" */
+export function buildMapQuery(p: AddressParts, opts: { bare?: boolean; colonia?: boolean; cp?: boolean; number?: boolean } = {}): string {
+  const { bare = false, colonia = true, cp = true, number = true } = opts;
+  const street = clean(p.street);
+  const base = bare ? bareStreet(street) : expandStreet(street);
+  const line = [base, number ? clean(p.street_number) : ''].filter(Boolean).join(' ');
+  const loc = resolveLocation(p.city, p.state);
   const parts: string[] = [];
-  const push = (v: string) => {
-    if (!v) return;
-    if (parts.some((x) => normalize(x) === normalize(v))) return;
-    parts.push(v);
-  };
-  push(buildStreetLine(p, false));
-  push(clean(p.neighborhood));
-  push(clean(p.city));
-  push(clean(p.state));
-  push(clean(p.postal_code));
+  const push = (v: string) => { if (v) parts.push(v); };
+  push(line);
+  if (colonia) push(stripPrefix(clean(p.neighborhood), /^col(onia)?\.?\s+/i));
+  push(stripPrefix(loc.city, /^(alcald[ií]a|municipio)\s+/i));
+  if (cp) push(clean(p.postal_code));
+  push(loc.state);
   push('México');
   return parts.join(', ');
 }
@@ -81,39 +152,57 @@ export function getGoogleEmbedSrc(p: AddressParts & { lat?: unknown; lng?: unkno
   return `https://maps.google.com/maps?q=${encodeURIComponent(buildMapQuery(p) || 'Ciudad de México')}&z=16&output=embed`;
 }
 
-/** Geocodificación con Nominatim: consulta estructurada → texto libre → solo C.P. */
-export async function geocodeAddress(p: AddressParts): Promise<{ lat: number; lng: number } | null> {
-  const base = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=mx&accept-language=es';
-  const run = async (qs: string) => {
-    const res = await fetch(`${base}&${qs}`);
-    const data = await res.json();
-    if (Array.isArray(data) && data.length > 0) {
-      return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
-    }
-    return null;
-  };
+// ---------- Geocodificación ----------
+export type GeoPrecision = 'exact' | 'street' | 'area';
+export interface GeoResult { lat: number; lng: number; precision: GeoPrecision; }
 
-  const street = [clean(p.street_number), clean(p.street).replace(/^(Av\.|Avenida)\s*/i, 'Avenida ')]
-    .filter(Boolean)
-    .join(' ');
-  const structured = new URLSearchParams();
-  if (street) structured.set('street', street);
-  if (clean(p.city)) structured.set('city', clean(p.city));
-  if (clean(p.state)) structured.set('state', clean(p.state));
-  if (clean(p.postal_code)) structured.set('postalcode', clean(p.postal_code));
-  structured.set('country', 'México');
+/**
+ * Nominatim (OpenStreetMap). Prueba de lo más específico a lo más general y
+ * DESCARTA resultados de otro estado (evita calles homónimas de Querétaro, etc.).
+ */
+export async function geocodeAddress(p: AddressParts): Promise<GeoResult | null> {
+  const loc = resolveLocation(p.city, p.state);
+  const expectedState = normalize(loc.state);
+  const cp = clean(p.postal_code);
+
+  const base =
+    'https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&limit=5&countrycodes=mx&accept-language=es';
+  const free = (q: string) => `q=${encodeURIComponent(q)}`;
 
   const attempts: string[] = [];
-  if (street) attempts.push(structured.toString());
-  const free = buildMapQuery(p);
-  if (free) attempts.push(`q=${encodeURIComponent(free)}`);
-  if (clean(p.postal_code)) {
-    attempts.push(`q=${encodeURIComponent(`${clean(p.postal_code)}, ${clean(p.city)}, México`)}`);
-  }
+  const addFree = (q: string) => {
+    const qs = free(q);
+    if (q && !attempts.includes(qs)) attempts.push(qs);
+  };
 
-  for (const qs of attempts) {
-    const found = await run(qs);
-    if (found) return found;
+  if (clean(p.street)) {
+    addFree(buildMapQuery(p));                       // Avenida Popocatépetl 415, Col, Alcaldía, CP, Estado, México
+    addFree(buildMapQuery(p, { bare: true }));       // Popocatépetl 415, Col, Alcaldía, CP, Estado, México
+    addFree(buildMapQuery(p, { colonia: false, cp: false })); // sin colonia ni C.P.
+
+    const structured = new URLSearchParams();
+    structured.set('street', [expandStreet(clean(p.street)), clean(p.street_number)].filter(Boolean).join(' '));
+    if (cp) structured.set('postalcode', cp);
+    if (loc.state) structured.set('state', loc.state);
+    structured.set('country', 'México');
+    attempts.push(structured.toString());
+
+    addFree(buildMapQuery(p, { number: false, cp: false })); // la calle, sin número
+  }
+  if (cp) addFree([cp, loc.state, 'México'].filter(Boolean).join(', ')); // aproximado por C.P.
+
+  for (let i = 0; i < attempts.length; i++) {
+    if (i > 0) await new Promise((r) => setTimeout(r, 1100)); // política de uso de Nominatim: 1 consulta/seg
+    const res = await fetch(`${base}&${attempts[i]}`);
+    const data = await res.json();
+    if (!Array.isArray(data)) continue;
+
+    const valid = data.filter((r: any) => !expectedState || normalize(r?.address?.state || '') === expectedState);
+    if (valid.length === 0) continue;
+
+    const hit = valid.find((r: any) => cp && r?.address?.postcode === cp) || valid[0];
+    const precision: GeoPrecision = hit.address?.house_number ? 'exact' : hit.address?.road ? 'street' : 'area';
+    return { lat: parseFloat(hit.lat), lng: parseFloat(hit.lon), precision };
   }
   return null;
 }
@@ -148,3 +237,28 @@ export const EXTRA_SPACES = [
   'Vestidor',
   'Cuarto de TV',
 ] as const;
+
+/** Lee la cantidad de cada espacio adicional (jsonb space_counts). Solo regresa los > 0. */
+export function parseSpaceCounts(p: { space_counts?: unknown; extra_spaces?: unknown }): Record<string, number> {
+  const out: Record<string, number> = {};
+  const raw = p.space_counts;
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+      const n = Math.floor(Number(v));
+      if (Number.isFinite(n) && n > 0) out[k] = n;
+    }
+  }
+  // Compatibilidad: si solo existía la lista anterior (sí/no), cada espacio cuenta como 1
+  if (Object.keys(out).length === 0 && Array.isArray(p.extra_spaces)) {
+    for (const k of p.extra_spaces as string[]) out[k] = 1;
+  }
+  return out;
+}
+
+/** [nombre, cantidad] en el orden de EXTRA_SPACES */
+export function getSpaceEntries(p: { space_counts?: unknown; extra_spaces?: unknown }): [string, number][] {
+  const counts = parseSpaceCounts(p);
+  const ordered = EXTRA_SPACES.filter((s) => counts[s]).map((s) => [s, counts[s]] as [string, number]);
+  const others = Object.keys(counts).filter((k) => !(EXTRA_SPACES as readonly string[]).includes(k)).map((k) => [k, counts[k]] as [string, number]);
+  return [...ordered, ...others];
+}
