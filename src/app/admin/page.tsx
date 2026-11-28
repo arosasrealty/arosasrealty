@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { buildFullAddress } from '@/lib/property';
+import { exportPropertiesToExcel } from '@/lib/exportProperties';
 
 interface Property {
   id: string;
@@ -35,6 +36,30 @@ export default function AdminDashboardPage() {
   const router = useRouter();
   const [properties, setProperties] = useState<Property[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
+  const [exporting, setExporting] = useState<boolean>(false);
+
+  async function handleExportExcel(): Promise<void> {
+    setExporting(true);
+    try {
+      // Todas las propiedades (cualquier estatus) con todos sus campos + sus fotos
+      const { data: allProps, error } = await supabase
+        .from('properties')
+        .select('*')
+        .order('created_at', { ascending: true });
+      if (error) throw error;
+
+      const { data: imgs } = await supabase
+        .from('property_images')
+        .select('property_id, image_url, is_main');
+
+      await exportPropertiesToExcel(allProps || [], imgs || []);
+    } catch (err) {
+      console.error('Error exportando a Excel:', err);
+      alert('No se pudo exportar el archivo. Intenta de nuevo.');
+    } finally {
+      setExporting(false);
+    }
+  }
 
   useEffect(() => {
     checkUserAndFetch();
@@ -98,6 +123,13 @@ export default function AdminDashboardPage() {
             >
               + Nueva Propiedad
             </Link>
+            <button
+              onClick={handleExportExcel}
+              disabled={exporting || properties.length === 0}
+              className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold px-4 py-2.5 rounded-xl transition shadow-sm"
+            >
+              {exporting ? 'Generando...' : '📊 Exportar a Excel'}
+            </button>
             <Link
               href="/"
               target="_blank"

@@ -98,8 +98,13 @@ const stripPrefix = (v: string, re: RegExp) => v.replace(re, '').trim();
  * "Av. Popocatépetl, No. 415, Col. Santa Cruz Atoyac, Alcaldía Benito Juárez, C.P. 03310, Ciudad de México"
  */
 export function buildFullAddress(p: AddressParts): string {
-  const street = clean(p.street);
   const ext = clean(p.street_number);
+  let street = clean(p.street);
+  // Datos viejos: la calle ya trae el número ("Av. Popocatépetl 415") y además se capturó el exterior
+  if (ext) {
+    const escaped = ext.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    street = street.replace(new RegExp(`[\\s,]*(?:no\\.?|n[uú]m\\.?|#)?\\s*${escaped}$`, 'i'), '').trim();
+  }
   const int = clean(p.interior_number);
   const colonia = stripPrefix(clean(p.neighborhood), /^col(onia)?\.?\s+/i);
   const { city: cityRaw, state } = resolveLocation(p.city, p.state);
@@ -107,11 +112,15 @@ export function buildFullAddress(p: AddressParts): string {
   const cp = clean(p.postal_code);
 
   const parts: string[] = [];
+  const streetN = normalize(street);
   if (street) parts.push(street);
   if (ext) parts.push(`No. ${ext}`);
   if (int) parts.push(`Int. ${int}`);
-  if (colonia) parts.push(`Col. ${colonia}`);
-  if (city) parts.push(`${state ? (isCdmx(state) ? 'Alcaldía ' : 'Municipio ') : ''}${city}`);
+  // Si la colonia o la alcaldía ya vienen escritas dentro de la calle, no se repiten
+  if (colonia && !streetN.includes(normalize(colonia))) parts.push(`Col. ${colonia}`);
+  if (city && normalize(city) !== normalize(colonia) && !streetN.includes(normalize(city))) {
+    parts.push(`${state ? (isCdmx(state) ? 'Alcaldía ' : 'Municipio ') : ''}${city}`);
+  }
   if (cp) parts.push(`C.P. ${cp}`);
   if (state) parts.push(state);
   return parts.join(', ');
@@ -261,4 +270,27 @@ export function getSpaceEntries(p: { space_counts?: unknown; extra_spaces?: unkn
   const ordered = EXTRA_SPACES.filter((s) => counts[s]).map((s) => [s, counts[s]] as [string, number]);
   const others = Object.keys(counts).filter((k) => !(EXTRA_SPACES as readonly string[]).includes(k)).map((k) => [k, counts[k]] as [string, number]);
   return [...ordered, ...others];
+}
+
+/**
+ * Mensaje de WhatsApp. Si el título ya menciona la calle o la colonia
+ * (ej. "Departamento en renta en Av. Popocatépetl"), no se vuelve a escribir el domicilio:
+ * la liga a la ficha ya lo trae.
+ */
+export function buildWhatsAppMessage(p: AddressParts & { id: string; title: string; short_code?: string | null }): string {
+  const address = buildFullAddress(p);
+  const titleN = normalize(clean(p.title));
+  const streetKey = normalize(bareStreet(clean(p.street)));
+  const coloniaKey = normalize(stripPrefix(clean(p.neighborhood), /^col(onia)?\.?\s+/i));
+  const titleHasLocation =
+    (streetKey.length > 3 && titleN.includes(streetKey)) ||
+    (coloniaKey.length > 3 && titleN.includes(coloniaKey));
+
+  const code = p.short_code || p.id;
+  const where = address && !titleHasLocation ? ` ubicada en ${address}` : '';
+  return (
+    `Hola, me interesa la propiedad "${clean(p.title)}"${where} ` +
+    `con ID ${code}: ${propertyUrl(p as { id: string; short_code?: string | null })}\n` +
+    `¿Podría darme más información?`
+  );
 }

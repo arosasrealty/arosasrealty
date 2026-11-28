@@ -8,6 +8,7 @@ import { jsPDF } from 'jspdf';
 import CopyAddressButton from '@/components/CopyAddressButton';
 import {
   buildFullAddress,
+  buildWhatsAppMessage,
   getGoogleEmbedSrc,
   getSpaceEntries,
   isShortCode,
@@ -491,11 +492,7 @@ export default function PublicPropertyDetailPage({ params }: PageProps) {
   const fullAddress = buildFullAddress(property);
 
   // ID corto + enlace directo a esta ficha (WhatsApp lo convierte en hipervínculo)
-  const displayId = property.short_code || property.id;
-  const whatsappMessage =
-    `Hola, me interesa la propiedad "${property.title}" ubicada en ${fullAddress || 'su catálogo'} ` +
-    `con ID ${displayId}: ${propertyUrl(property)}\n` +
-    `¿Podría darme más información?`;
+  const whatsappMessage = buildWhatsAppMessage(property);
   // wa.me con el número del negocio: abre directo el chat con WhatsApp Business (web y móvil)
   const whatsappUrl = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(whatsappMessage)}`;
   const location = resolveLocation(property.city, property.state);
